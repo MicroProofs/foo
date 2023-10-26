@@ -67,8 +67,23 @@ inductive big_step : State -> State -> Prop
   | computeLookup {x p s} :
     big_step (State.compute (Term.var x) p s) (match lookupVar p x with | none => State.error | some v => State.ret v s)
   | computeConstant {c p s} : big_step (State.compute (Term.con c) p s) (State.ret (Value.vCon c) s)
-  -- | State.ret (Value.vBuiltin b) (Frame.force :: s) : reduc (State.ret (Value.vBuiltin (BuiltinValue.force b)) s)
+  | computeLambda {x m p s} : big_step (State.compute (Term.lam x m) p s) (State.ret (Value.vLam x m p) s)
+  | computeDelay {m p s} : big_step (State.compute (Term.delay m) p s) (State.ret (Value.vDelay m p) s)
+  | computeForce {m p s} : big_step (State.compute (Term.force m) p s) (State.compute m p (Frame.force :: s))
+  | computeApp {m n p s} : big_step (State.compute (Term.app m n) p s) (State.compute m p (Frame.leftAppTerm n p :: s))
+  | computeBuiltin {b p s} : big_step (State.compute (Term.builtin b) p s) (State.ret (Value.vBuiltin (BuiltinValue.builtin b)) s)
+  | computeError {p s} : big_step (State.compute Term.error p s) State.error
+  | ret {v s} : big_step (State.ret v s) (State.halt v)
+  | retLeftAppTerm {m p v s} : big_step (State.ret v (Frame.leftAppTerm m p :: s)) (State.compute m p (Frame.rightApp v :: s))
+  | retRightApp {x m p v s} : big_step (State.ret v (Frame.rightApp (Value.vLam x m p) :: s)) (State.compute m ((x, v) :: p) s)
+  | retLeftAppValue {x m p v s} : big_step (State.ret (Value.vLam x m p) (Frame.leftAppValue v :: s)) (State.compute m ((x, v) :: p) s)
+  | retRightAppBuiltin {b v s} : big_step (State.ret v (Frame.rightApp (Value.vBuiltin b) :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
+  | retLeftAppValueBuiltin {b v s} : big_step (State.ret (Value.vBuiltin b) (Frame.leftAppValue v :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
+  | retDelay {m p s} : big_step (State.ret (Value.vDelay m p) (Frame.force :: s)) (State.compute m p s)
+  | retBuiltin {b s} : big_step (State.ret (Value.vBuiltin b) (Frame.force :: s)) (State.ret (Value.vBuiltin (BuiltinValue.force b)) s)
   | catchAll {s} : big_step s State.error
+
+
 
 
 partial def reduc (st : State) : State :=
