@@ -1,3 +1,4 @@
+
 def hello := "world"
 open String
 open Nat
@@ -90,9 +91,8 @@ def lookup_var (e: List (String × Value)) (x: String) : Option Value :=
   | seq {m m' m'' s s' s''} (h: small_step (m, s) (m', s')) (h': small_step (m', s') (m'', s'')):
     small_step (m, s) (m'', s'')
 
-  | computeLookup {x p s} : small_step
-    ((Instruction.term (Term.var x)), (State.compute p s))
-    (match lookup_var p x with | none => ((Instruction.term Term.error), State.error) | some v => ((Instruction.value v), State.ret s))
+  | computeLookup {v x p s} :
+    small_step (Instruction.term (Term.var x), State.compute ((x, v) :: p) s) (Instruction.value v, State.ret s)
 
   | computeConstant {c p s} : small_step (Instruction.term (Term.con c) ,State.compute p s) (Instruction.value (Value.vCon c), State.ret s)
   | computeLambda {x m p s} : small_step (Instruction.term (Term.lam x m), State.compute p s) (Instruction.value (Value.vLam x m p), State.ret s)
@@ -114,6 +114,7 @@ def lookup_var (e: List (String × Value)) (x: String) : Option Value :=
 
 
 infix: 90 "⟶" => small_step
+
 
 
 theorem small_step_compute_lambda
@@ -138,6 +139,29 @@ theorem force_delay_just_term
 
 
 
+theorem lam_apply_var_is_applied_term
+  {x p s}:
+  (Instruction.term (Term.app (Term.lam x (Term.var x)) (Term.con 5)), State.compute p s) ⟶
+  (Instruction.value (Value.vCon 5), State.ret s) := by
+    have h: (Instruction.term (Term.app (Term.lam x (Term.var x)) (Term.con 5)), State.compute p s) ⟶
+      (Instruction.term (Term.lam x (Term.var x)), State.compute p (Frame.leftAppTerm (Term.con 5) p :: s)) := by
+        apply small_step.computeApp
+    have h': (Instruction.term (Term.lam x (Term.var x)), State.compute p (Frame.leftAppTerm (Term.con 5) p :: s)) ⟶
+      (Instruction.value (Value.vLam x (Term.var x) p), State.ret (Frame.leftAppTerm (Term.con 5) p :: s)) := by
+        apply small_step.computeLambda
+    have h'': (Instruction.value (Value.vLam x (Term.var x) p), State.ret (Frame.leftAppTerm (Term.con 5) p :: s)) ⟶
+      (Instruction.term (Term.con 5), State.compute p ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) := by
+        apply small_step.retLeftAppTerm
+    have h''': (Instruction.term (Term.con 5), State.compute p ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) ⟶
+      (Instruction.value (Value.vCon 5), State.ret ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) := by
+        apply small_step.computeConstant
+    have h'''': (Instruction.value (Value.vCon 5), State.ret ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) ⟶
+      (Instruction.term (Term.var x), State.compute ((x, (Value.vCon 5)) :: p) s) := by
+        apply small_step.retRightApp
+    have h''''' : (Instruction.term (Term.var x), State.compute ((x, (Value.vCon 5)) :: p) s) ⟶
+      (Instruction.value (Value.vCon 5), State.ret s) := by
+        apply small_step.computeLookup
+    exact small_step.seq (small_step.seq (small_step.seq (small_step.seq (small_step.seq h h') h'') h''') h'''') h'''''
 
 
 
