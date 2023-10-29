@@ -116,10 +116,6 @@ def lookup_var (e: List (String × Value)) (x: String) : Option Value :=
 infix: 90 "⟶" => small_step
 
 
--- def simpleTerm: Program :=
---   ({v := 0, m := Term.app (Term.lam "so" (Term.var "so")) (Term.con 5)})
-
-
 theorem small_step_compute_lambda
 {x m p s} : (Instruction.term (Term.lam x m), State.compute  p s) ⟶ (Instruction.value (Value.vLam x m p), State.ret s) := by
   apply small_step.computeLambda
@@ -127,12 +123,18 @@ theorem small_step_compute_lambda
 
 theorem force_delay_just_term
   {m p s}:
-  (Instruction.term (Term.force (Term.delay m)), State.compute p s) ⟶ (Instruction.value (Value.vDelay m p), State.ret (Frame.force :: s)) := by
-    have h: (Instruction.term (Term.force (Term.delay m)), State.compute p s) ⟶ (Instruction.term (Term.delay m), State.compute p (Frame.force :: s)) := by
-      apply small_step.computeForce
-    have h': (Instruction.term (Term.delay m), State.compute p (Frame.force :: s)) ⟶ (Instruction.value (Value.vDelay m p), State.ret (Frame.force :: s)) := by
-      apply small_step.computeDelay
-    exact small_step.seq h h'
+  (Instruction.term (Term.force (Term.delay m)), State.compute p s) ⟶
+  (Instruction.term m, State.compute p s) := by
+    have h: (Instruction.term (Term.force (Term.delay m)), State.compute p s) ⟶
+      (Instruction.term (Term.delay m), State.compute p (Frame.force :: s)) := by
+        apply small_step.computeForce
+    have h': (Instruction.term (Term.delay m), State.compute p (Frame.force :: s)) ⟶
+      (Instruction.value (Value.vDelay m p), State.ret (Frame.force :: s)) := by
+        apply small_step.computeDelay
+    have h'': (Instruction.value (Value.vDelay m p), State.ret (Frame.force :: s)) ⟶
+      (Instruction.term m, State.compute p s) := by
+        apply small_step.retDelay
+    exact small_step.seq (small_step.seq h h') h''
 
 
 
