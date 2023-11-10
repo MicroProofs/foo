@@ -217,29 +217,37 @@ theorem forces3
 
 
 
--- theorem lam_apply_var_is_applied_term
---   {x p s}:
---   (Instruction.term (Term.app (Term.lam x (Term.var x)) (Term.con 5)), State.compute p s) ⟶
---   (Instruction.value (Value.vCon 5), State.ret s) := by
---     have h: (Instruction.term (Term.app (Term.lam x (Term.var x)) (Term.con 5)), State.compute p s) ⟶
---       (Instruction.term (Term.lam x (Term.var x)), State.compute p (Frame.leftAppTerm (Term.con 5) p :: s)) := by
---         apply small_step.computeApp
---     have h': (Instruction.term (Term.lam x (Term.var x)), State.compute p (Frame.leftAppTerm (Term.con 5) p :: s)) ⟶
---       (Instruction.value (Value.vLam x (Term.var x) p), State.ret (Frame.leftAppTerm (Term.con 5) p :: s)) := by
---         apply small_step.computeLambda
---     have h'': (Instruction.value (Value.vLam x (Term.var x) p), State.ret (Frame.leftAppTerm (Term.con 5) p :: s)) ⟶
---       (Instruction.term (Term.con 5), State.compute p ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) := by
---         apply small_step.retLeftAppTerm
---     have h''': (Instruction.term (Term.con 5), State.compute p ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) ⟶
---       (Instruction.value (Value.vCon 5), State.ret ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) := by
---         apply small_step.computeConstant
---     have h'''': (Instruction.value (Value.vCon 5), State.ret ((Frame.rightApp (Value.vLam x (Term.var x) p)) :: s)) ⟶
---       (Instruction.term (Term.var x), State.compute ((x, (Value.vCon 5)) :: p) s) := by
---         apply small_step.retRightApp
---     have h''''' : (Instruction.term (Term.var x), State.compute ((x, (Value.vCon 5)) :: p) s) ⟶
---       (Instruction.value (Value.vCon 5), State.ret s) := by
---         apply small_step.computeLookup
---     exact small_step.seq (small_step.seq (small_step.seq (small_step.seq (small_step.seq h h') h'') h''') h'''') h'''''
+theorem lam_apply_var_is_applied_term
+  {x p}:
+  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con 5)) p []) ⟶
+  (State.halt (Value.vCon 5)) := by
+    apply small_step.seq
+    case h => exact small_step.computeApp
+    case h' =>
+      apply small_step.seq
+      case h => exact small_step.computeLambda
+      case h' =>
+        apply small_step.seq
+        case h => exact small_step.retLeftAppTerm
+        case h' =>
+          apply small_step.seq
+          case h => exact small_step.computeConstant
+          case h' =>
+            apply small_step.seq
+            case h => exact small_step.retRightApp
+            case h' =>
+              apply small_step.seq
+              case h =>
+                apply small_step.computeLookup;
+                case h =>
+                  rw [lookup_var]
+                  simp
+                  rfl
+              case h' => exact small_step.ret
+
+
+
+
 
 
 theorem lam_apply_var_is_applied_term2
