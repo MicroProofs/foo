@@ -13,10 +13,6 @@ inductive Function where
   | subtractInteger : Function
 deriving Repr
 
-structure Builtin where
-  function: Function
-deriving Repr
-
 def builtin_arity (function: Function): Nat × Nat :=
   match function with
   | .addInteger => (0, 2)
@@ -24,7 +20,7 @@ def builtin_arity (function: Function): Nat × Nat :=
 
 inductive Term where
   | var (x : String) : Term
-  | builtin (b: Builtin): Term
+  | builtin (b: Function): Term
   | con (c : Int) : Term
   | lam (x: String) (m : Term) : Term
   | app (m : Term) (n : Term) : Term
@@ -48,7 +44,7 @@ inductive Value where
 deriving Repr
 
 inductive BuiltinValue where
-  | builtin (b: Builtin): BuiltinValue
+  | builtin (b: Function): BuiltinValue
   | app (b: BuiltinValue) (v: Value): BuiltinValue
   | force (b: BuiltinValue): BuiltinValue
 deriving Repr
@@ -57,7 +53,7 @@ end
 -- Partial Builtin functions
 def builtin_name (b: BuiltinValue): Function :=
   match b with
-    | .builtin b => b.function
+    | .builtin b => b
     | .app b _ => builtin_name b
     | .force b => builtin_name b
 
@@ -192,7 +188,9 @@ inductive small_step : State -> State -> Prop
 
   | retLeftAppValueBuiltin {b v s} (h: not_all_args_applied (builtin_size b) (builtin_arity (builtin_name b))) : small_step (State.ret (Value.vBuiltin b) (Frame.leftAppValue v :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
 
-  | builtinEval {b s} (h: builtin_size b = builtin_arity (builtin_name b)) (h': eval_builtin s b h = s' ) : small_step (State.ret (Value.vBuiltin b) s) s'
+  | builtinEval {b s} (h: builtin_size b = builtin_arity (builtin_name b)) (h': eval_builtin s b h = State.ret v s) : small_step (State.ret (Value.vBuiltin b) s) (State.ret v s)
+
+  | builtinEvalError {b s} (h: builtin_size b = builtin_arity (builtin_name b)) (h': eval_builtin s b h = State.error) : small_step (State.ret (Value.vBuiltin b) s) (State.error)
 
   | retForceDelay {m p s} : small_step (State.ret (Value.vDelay m p) (Frame.force :: s)) (State.compute m p s)
 
@@ -328,7 +326,7 @@ theorem lam_apply_var_is_applied_term
             case h' =>
               apply small_step.seq
               case h =>
-                apply small_step.computeLookup;
+                apply small_step.computeLookup
                 case h =>
                   simp [lookup_var]
                   rfl
@@ -358,7 +356,7 @@ theorem lam_apply_var_is_applied_term2
 
 theorem builtin_apply_add_integer
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (Builtin.mk .addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
+  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
   (State.halt (Value.vCon 5)) := by
     apply small_step.seq
     apply small_step.computeApp
@@ -373,7 +371,8 @@ theorem builtin_apply_add_integer
     apply small_step.seq
     apply small_step.retRightAppBuiltin
     case h =>
-      simp [not_all_args_applied]
+      rw [not_all_args_applied]
+      simp
 
     case h' =>
       apply small_step.seq
@@ -383,35 +382,65 @@ theorem builtin_apply_add_integer
       apply small_step.seq
       apply small_step.retRightAppBuiltin
       case h =>
-        simp [not_all_args_applied, builtin_arity, builtin_size, builtin_args, builtin_name]
+        rw [not_all_args_applied]
+        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
       case h' =>
         apply small_step.seq
         case h =>
           apply small_step.builtinEval
           case h =>
-            simp [builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
+            rw [builtin_arity, builtin_size]
+            simp [force_size, builtin_name, builtin_args]
           case h' =>
-            simp [eval_builtin, builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
+            rw [eval_builtin]
+            simp [builtin_args, builtin_name]
             rfl
         case h' =>
           apply small_step.ret
 
 
--- theorem builtin_apply_add_integer2
---   {p}:
---   (State.compute (Term.app (Term.app (Term.builtin (Builtin.mk .addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
---   (State.halt (Value.vCon 5)) := by
---     repeat (first
---       | apply small_step.computeApp
---       | apply small_step.computeBuiltin
---       | apply small_step.retLeftAppTerm
---       | apply small_step.computeConstant
---       | apply small_step.retRightAppBuiltin
---       | simp [not_all_args_applied]
---       | simp [not_all_args_applied, builtin_arity, builtin_size, builtin_args, builtin_name]
---       | apply small_step.builtinEval
---       | simp [builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
---       | simp [eval_builtin, builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
---         rfl
---       | apply small_step.ret
---       | apply small_step.seq)
+theorem builtin_apply_add_integer2
+  {p}:
+  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
+  (State.halt (Value.vCon 5)) := by
+    repeat (first
+      | apply small_step.computeApp
+      | apply small_step.computeBuiltin
+      | apply small_step.retLeftAppTerm
+      | apply small_step.computeConstant
+      | apply small_step.retRightAppBuiltin
+      | apply small_step.builtinEval
+      | apply small_step.builtinEvalError
+      | rw [not_all_args_applied]
+        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+      | rw [eval_builtin]
+        simp [builtin_args, builtin_name]
+        rfl
+      | rw [builtin_arity, builtin_size]
+        simp [force_size, builtin_name, builtin_args]
+      | apply small_step.ret
+      | apply small_step.seq)
+
+
+
+theorem builtin_apply_sub_integer
+  {p}:
+  (State.compute (Term.app (Term.app (Term.builtin (.subtractInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
+  (State.halt (Value.vCon (-1))) := by
+    repeat (first
+      | apply small_step.computeApp
+      | apply small_step.computeBuiltin
+      | apply small_step.retLeftAppTerm
+      | apply small_step.computeConstant
+      | apply small_step.retRightAppBuiltin
+      | apply small_step.builtinEval
+      | apply small_step.builtinEvalError
+      | rw [not_all_args_applied]
+        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+      | rw [eval_builtin]
+        simp [builtin_args, builtin_name]
+        rfl
+      | rw [builtin_arity, builtin_size]
+        simp [force_size, builtin_name, builtin_args]
+      | apply small_step.ret
+      | apply small_step.seq)
