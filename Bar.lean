@@ -192,7 +192,7 @@ inductive small_step : State -> State -> Prop
 
   | retLeftAppValueBuiltin {b v s} (h: not_all_args_applied (builtin_size b) (builtin_arity (builtin_name b))) : small_step (State.ret (Value.vBuiltin b) (Frame.leftAppValue v :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
 
-  | BuiltinEval {b s} (h: builtin_size b = builtin_arity (builtin_name b)) (h': eval_builtin s b h = s' ) : small_step (State.ret (Value.vBuiltin b) s) s'
+  | builtinEval {b s} (h: builtin_size b = builtin_arity (builtin_name b)) (h': eval_builtin s b h = s' ) : small_step (State.ret (Value.vBuiltin b) s) s'
 
   | retForceDelay {m p s} : small_step (State.ret (Value.vDelay m p) (Frame.force :: s)) (State.compute m p s)
 
@@ -354,3 +354,64 @@ theorem lam_apply_var_is_applied_term2
         rfl
       | apply small_step.ret
       | apply small_step.seq)
+
+
+theorem builtin_apply_add_integer
+  {p}:
+  (State.compute (Term.app (Term.app (Term.builtin (Builtin.mk .addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
+  (State.halt (Value.vCon 5)) := by
+    apply small_step.seq
+    apply small_step.computeApp
+    apply small_step.seq
+    apply small_step.computeApp
+    apply small_step.seq
+    apply small_step.computeBuiltin
+    apply small_step.seq
+    apply small_step.retLeftAppTerm
+    apply small_step.seq
+    apply small_step.computeConstant
+    apply small_step.seq
+    apply small_step.retRightAppBuiltin
+    case h =>
+      simp [not_all_args_applied]
+
+    case h' =>
+      apply small_step.seq
+      apply small_step.retLeftAppTerm
+      apply small_step.seq
+      apply small_step.computeConstant
+      apply small_step.seq
+      apply small_step.retRightAppBuiltin
+      case h =>
+        simp [not_all_args_applied, builtin_arity, builtin_size, builtin_args, builtin_name]
+      case h' =>
+        apply small_step.seq
+        case h =>
+          apply small_step.builtinEval
+          case h =>
+            simp [builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
+          case h' =>
+            simp [eval_builtin, builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
+            rfl
+        case h' =>
+          apply small_step.ret
+
+
+-- theorem builtin_apply_add_integer2
+--   {p}:
+--   (State.compute (Term.app (Term.app (Term.builtin (Builtin.mk .addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
+--   (State.halt (Value.vCon 5)) := by
+--     repeat (first
+--       | apply small_step.computeApp
+--       | apply small_step.computeBuiltin
+--       | apply small_step.retLeftAppTerm
+--       | apply small_step.computeConstant
+--       | apply small_step.retRightAppBuiltin
+--       | simp [not_all_args_applied]
+--       | simp [not_all_args_applied, builtin_arity, builtin_size, builtin_args, builtin_name]
+--       | apply small_step.builtinEval
+--       | simp [builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
+--       | simp [eval_builtin, builtin_arity, builtin_size, builtin_args, builtin_name, force_size]
+--         rfl
+--       | apply small_step.ret
+--       | apply small_step.seq)
