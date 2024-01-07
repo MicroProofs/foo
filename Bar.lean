@@ -3,6 +3,7 @@ open String
 open Nat
 open Int
 open List
+open Bool
 
 -- Term and Program Structures
 def Name := String
@@ -11,17 +12,28 @@ deriving Repr
 inductive Function where
   | addInteger : Function
   | subtractInteger : Function
+  | lessThanInteger : Function
+  | lessThanEqualsInteger : Function
 deriving Repr
 
 def builtin_arity (function: Function): Nat × Nat :=
   match function with
   | .addInteger => (0, 2)
   | .subtractInteger => (0, 2)
+  | .lessThanInteger => (0, 2)
+  | .lessThanEqualsInteger => (0, 2)
+
+
+inductive Constant where
+  | int (i: Int) : Constant
+  | bool (b: Bool) : Constant
+deriving Repr
+
 
 inductive Term where
   | var (x : String) : Term
   | builtin (b: Function): Term
-  | con (c : Int) : Term
+  | con (c : Constant) : Term
   | lam (x: String) (m : Term) : Term
   | app (m : Term) (n : Term) : Term
   | delay (m : Term) : Term
@@ -37,7 +49,7 @@ deriving Repr
 -- Value Structures
 mutual
 inductive Value where
-  | vCon (c : Int) : Value
+  | vCon (c : Constant) : Value
   | vLam (x: String) (m : Term) (p: List (String × Value)) : Value
   | vDelay (m : Term) (p: List (String × Value)) : Value
   | vBuiltin (b: BuiltinValue): Value
@@ -132,27 +144,37 @@ theorem args_length_is_arity {b} (h: builtin_size b = builtin_arity (builtin_nam
 
 def eval_builtin (s: Stack) (b: BuiltinValue) (h: builtin_size b = builtin_arity (builtin_name b)) : State :=
   let args := builtin_args b
-  have j: 1 < List.length args := by
+
+  have j: 0 < List.length args := by
     simp [args_length_is_arity, h, builtin_arity]
     cases builtin_name b with
       | _ => simp
 
-   have jj: 0 < List.length args := by
+  have jj: 1 < List.length args := by
     simp [args_length_is_arity, h, builtin_arity]
     cases builtin_name b with
       | _ => simp
 
   match (builtin_name b) with
-    | Function.addInteger => match (args[0]'jj, args[1]'j) with
-      | (Value.vCon l, Value.vCon r) =>
-        State.ret (Value.vCon (l + r)) s
+    | .addInteger => match (args[0], args[1]) with
+      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
+        State.ret (Value.vCon (Constant.int (l + r))) s
       | (_, _) => State.error
 
-    | Function.subtractInteger => match (args[0]'jj, args[1]'j) with
-      | (Value.vCon l, Value.vCon r) =>
-        State.ret (Value.vCon (l - r)) s
+    | .subtractInteger => match (args[0], args[1]) with
+      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
+        State.ret (Value.vCon (Constant.int (l - r))) s
       | (_, _) => State.error
 
+    | .lessThanInteger => match (args[0], args[1]) with
+      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
+        State.ret (Value.vCon (Constant.bool (l < r))) s
+      | (_, _) => State.error
+
+    | .lessThanEqualsInteger => match (args[0], args[1]) with
+      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
+        State.ret (Value.vCon (Constant.bool (l <= r))) s
+      | (_, _) => State.error
 
 
 
@@ -307,8 +329,8 @@ theorem forces3
 
 theorem lam_apply_var_is_applied_term
   {x p}:
-  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con 5)) p []) ⟶
-  (State.halt (Value.vCon 5)) := by
+  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con (.int 5))) p []) ⟶
+  (State.halt (Value.vCon (.int 5))) := by
     apply small_step.seq
     case h => exact small_step.computeApp
     case h' =>
@@ -339,8 +361,8 @@ theorem lam_apply_var_is_applied_term
 
 theorem lam_apply_var_is_applied_term2
   {x p}:
-  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con 5)) p []) ⟶
-  (State.halt (Value.vCon 5)) := by
+  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con (.int 5))) p []) ⟶
+  (State.halt (Value.vCon (.int 5))) := by
     repeat (first
       | apply small_step.computeApp
       | apply small_step.computeLambda
@@ -356,8 +378,8 @@ theorem lam_apply_var_is_applied_term2
 
 theorem builtin_apply_add_integer
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
-  (State.halt (Value.vCon 5)) := by
+  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con (.int 2))) (Term.con (.int 3))) p []) ⟶
+  (State.halt (Value.vCon (.int 5))) := by
     apply small_step.seq
     apply small_step.computeApp
     apply small_step.seq
@@ -401,8 +423,8 @@ theorem builtin_apply_add_integer
 
 theorem builtin_apply_add_integer2
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
-  (State.halt (Value.vCon 5)) := by
+  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con (.int 2))) (Term.con (.int 3))) p []) ⟶
+  (State.halt (Value.vCon (.int 5))) := by
     repeat (first
       | apply small_step.computeApp
       | apply small_step.computeBuiltin
@@ -425,8 +447,8 @@ theorem builtin_apply_add_integer2
 
 theorem builtin_apply_sub_integer
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (.subtractInteger) ) (Term.con 2)) (Term.con 3)) p []) ⟶
-  (State.halt (Value.vCon (-1))) := by
+  (State.compute (Term.app (Term.app (Term.builtin (.subtractInteger) ) (Term.con (.int 2))) (Term.con (.int 3))) p []) ⟶
+  (State.halt (Value.vCon (.int (-1)))) := by
     repeat (first
       | apply small_step.computeApp
       | apply small_step.computeBuiltin
@@ -439,6 +461,74 @@ theorem builtin_apply_sub_integer
         simp [builtin_arity, builtin_size, builtin_args, builtin_name]
       | rw [eval_builtin]
         simp [builtin_args, builtin_name]
+        rfl
+      | rw [builtin_arity, builtin_size]
+        simp [force_size, builtin_name, builtin_args]
+      | apply small_step.ret
+      | apply small_step.seq)
+
+
+theorem builtin_apply_less_than_integer
+  {p i} (q: i > 5):
+  (State.compute (Term.app (Term.app (Term.builtin (.lessThanInteger) ) (Term.con (.int 5))) (Term.con (.int i))) p []) ⟶
+  (State.halt (Value.vCon (.bool (true)))) := by
+    apply small_step.seq
+    apply small_step.computeApp
+    apply small_step.seq
+    apply small_step.computeApp
+    apply small_step.seq
+    apply small_step.computeBuiltin
+    apply small_step.seq
+    apply small_step.retLeftAppTerm
+    apply small_step.seq
+    apply small_step.computeConstant
+    apply small_step.seq
+    apply small_step.retRightAppBuiltin
+    case h =>
+      rw [not_all_args_applied]
+      simp
+
+    case h' =>
+      apply small_step.seq
+      apply small_step.retLeftAppTerm
+      apply small_step.seq
+      apply small_step.computeConstant
+      apply small_step.seq
+      apply small_step.retRightAppBuiltin
+      case h =>
+        rw [not_all_args_applied]
+        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+      case h' =>
+        apply small_step.seq
+        case h =>
+          apply small_step.builtinEval
+          case h =>
+            rw [builtin_arity, builtin_size]
+            simp [force_size, builtin_name, builtin_args]
+          case h' =>
+            rw [eval_builtin]
+            simp [builtin_args, builtin_name, q]
+            rfl
+        case h' =>
+          exact small_step.ret
+
+
+theorem builtin_apply_less_than_integer2
+  {p i} (q: i > 5):
+  (State.compute (Term.app (Term.app (Term.builtin (.lessThanInteger) ) (Term.con (.int 5))) (Term.con (.int i))) p []) ⟶
+  (State.halt (Value.vCon (.bool (true)))) := by
+    repeat (first
+      | apply small_step.computeApp
+      | apply small_step.computeBuiltin
+      | apply small_step.retLeftAppTerm
+      | apply small_step.computeConstant
+      | apply small_step.retRightAppBuiltin
+      | apply small_step.builtinEval
+      | apply small_step.builtinEvalError
+      | rw [not_all_args_applied]
+        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+      | rw [eval_builtin]
+        simp [builtin_args, builtin_name, q]
         rfl
       | rw [builtin_arity, builtin_size]
         simp [force_size, builtin_name, builtin_args]
