@@ -11,6 +11,7 @@ inductive Function where
   | multiplyInteger: Function
   | lessThanInteger : Function
   | lessThanEqualsInteger : Function
+  | equalsInteger: Function
 deriving Repr
 
 def builtin_arity (function: Function): Nat × Nat :=
@@ -20,6 +21,7 @@ def builtin_arity (function: Function): Nat × Nat :=
   | .multiplyInteger => (0, 2)
   | .lessThanInteger => (0, 2)
   | .lessThanEqualsInteger => (0, 2)
+  | .equalsInteger => (0, 2)
 
 
 inductive Constant where
@@ -174,6 +176,11 @@ def eval_builtin (s: Stack) (b: BuiltinValue) (h: builtin_size b = builtin_arity
         State.ret (Value.vCon (Constant.bool (l <= r))) s
       | (_, _) => State.error
 
+    | .equalsInteger => match (args[0], args[1]) with
+      | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
+        State.ret (Value.vCon (Constant.bool (l == r))) s
+      | (_, _) => State.error
+
     | .multiplyInteger => match (args[0], args[1]) with
       | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
         State.ret (Value.vCon (Constant.integer (l * r))) s
@@ -230,6 +237,8 @@ syntax:max "Term|" term : term
 
 syntax:max "Type|" term : term
 
+syntax:max "Builtin|" term : term
+
 syntax:max "var/" term : term
 
 macro_rules
@@ -241,7 +250,7 @@ macro_rules
 | `(Term|(delay $m)) => `(Term.delay (Term|$m))
 | `(Term|(error)) => `(Term.error)
 | `(Term|(con $t $c)) => `(Term.con (Type|$t $c))
-| `(Term|(builtin $b)) => `(Term.builtin $b)
+| `(Term|(builtin $b)) => `(Term.builtin (Builtin| $b))
 | `(Term|$t) => `($t)
 
 
@@ -249,12 +258,25 @@ macro_rules
 | `(Type|integer $c) => `(Constant.integer $c)
 | `(Type|bool $c) => `(Constant.bool $c)
 
+
+
+macro_rules
+| `(Builtin|addInteger) => `(Function.addInteger)
+| `(Builtin|subtractInteger) => `(Function.subtractInteger)
+| `(Builtin|multiplyInteger) => `(Function.multiplyInteger)
+| `(Builtin|lessThanInteger) => `(Function.lessThanInteger)
+| `(Builtin|lessThanEqualsInteger) => `(Function.lessThanEqualsInteger)
+| `(Builtin|equalsInteger) => `(Function.equalsInteger)
+
+
+
 -- notation: max "(lam " name:max body:max ")" => Term.lam name body
 -- notation: max "(delay " body:max ")" => Term.delay body
 -- notation: max "(force " body:max ")" => Term.force body
 
 def x := (Term| (con integer 5))
 def y {f x} := (Term| (lam f (lam x [var/f  var/x])))
+def z := (Term| (builtin addInteger))
 
 
 theorem small_step_compute_lambda
@@ -410,7 +432,7 @@ theorem lam_apply_var_is_applied_term2
 
 theorem builtin_apply_add_integer
   {p}:
-  (State.compute (Term| [[(builtin .addInteger) (con integer 2)] (con integer 3)]) p []) ⟶
+  (State.compute (Term| [[(builtin addInteger) (con integer 2)] (con integer 3)]) p []) ⟶
   (State.halt (Value.vCon (.integer 5))) := by
     apply small_step.seq
     apply small_step.computeApp
@@ -455,7 +477,7 @@ theorem builtin_apply_add_integer
 
 theorem builtin_apply_add_integer2
   {p}:
-  (State.compute (Term| [[(builtin (.addInteger) ) (con integer 2)] (con integer 3)]) p []) ⟶
+  (State.compute (Term| [[(builtin addInteger) (con integer 2)] (con integer 3)]) p []) ⟶
   (State.halt (Value.vCon (.integer 5))) := by
     repeat (first
       | apply small_step.computeApp
@@ -479,7 +501,7 @@ theorem builtin_apply_add_integer2
 
 theorem builtin_apply_sub_integer
   {p}:
-  (State.compute (Term| [[(builtin (.subtractInteger) ) (con integer 2)] (con integer 3)]) p []) ⟶
+  (State.compute (Term| [[(builtin subtractInteger) (con integer 2)] (con integer 3)]) p []) ⟶
   (State.halt (Value.vCon (.integer (-1)))) := by
     repeat (first
       | apply small_step.computeApp
@@ -502,7 +524,7 @@ theorem builtin_apply_sub_integer
 
 theorem builtin_apply_less_than_integer
   {p} (i: Int) (q: 5 < i):
-  (State.compute (Term| [[(builtin (.lessThanInteger)) (con integer 5)] (con integer i)]) p []) ⟶
+  (State.compute (Term| [[(builtin lessThanInteger) (con integer 5)] (con integer i)]) p []) ⟶
   (State.halt (Value.vCon (.bool true))) := by
     apply small_step.seq
     apply small_step.computeApp
@@ -548,7 +570,7 @@ theorem builtin_apply_less_than_integer
 
 theorem builtin_apply_less_than_integer2
   {p} (i: Int) (q: i > 5):
-  (State.compute (Term| [[(builtin (.lessThanInteger)) (con integer 5)] (con integer i)]) p []) ⟶
+  (State.compute (Term| [[(builtin lessThanInteger) (con integer 5)] (con integer i)]) p []) ⟶
   (State.halt (Value.vCon (.bool (true)))) := by
     repeat (first
       | apply small_step.computeApp
@@ -682,33 +704,33 @@ theorem apply_add_2(f: String) (x: String) :
     [
       [
         (force (force (delay (delay (lam f (lam x [ var/f var/x ]))))))
-        (builtin .addInteger)
+        (builtin addInteger)
       ]
       [
         (lam
           x0
           [
             [
-              (builtin .multiplyInteger)
+              (builtin multiplyInteger)
               [
                 [
-                  (builtin .subtractInteger)
+                  (builtin subtractInteger)
                   [
-                    [ (builtin .subtractInteger) (con integer 3) ]
+                    [ (builtin subtractInteger) (con integer 3) ]
                     (con integer 2)
                   ]
                 ]
-                [ [ (builtin .addInteger) (con integer 2) ] (con integer 0) ]
+                [ [ (builtin addInteger) (con integer 2) ] (con integer 0) ]
               ]
             ]
             [
               [
-                (builtin .subtractInteger)
+                (builtin subtractInteger)
                 [
-                  [ (builtin .multiplyInteger) (con integer 3) ] (con integer 0)
+                  [ (builtin multiplyInteger) (con integer 3) ] (con integer 0)
                 ]
               ]
-              [ [ (builtin .multiplyInteger) (con integer 1) ] (con integer 1) ]
+              [ [ (builtin multiplyInteger) (con integer 1) ] (con integer 1) ]
             ]
           ]
         )
@@ -717,20 +739,20 @@ theorem apply_add_2(f: String) (x: String) :
             (builtin lessThanEqualsInteger)
             [
               [
-                (builtin .subtractInteger)
+                (builtin subtractInteger)
                 [
-                  [ (builtin .multiplyInteger) (con integer 3) ] (con integer 3)
+                  [ (builtin multiplyInteger) (con integer 3) ] (con integer 3)
                 ]
               ]
-              [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 3) ]
+              [ [ (builtin subtractInteger) (con integer 2) ] (con integer 3) ]
             ]
           ]
           [
             [
-              (builtin .addInteger)
-              [ [ (builtin .addInteger) (con integer 2) ] (con integer 3) ]
+              (builtin addInteger)
+              [ [ (builtin addInteger) (con integer 2) ] (con integer 3) ]
             ]
-            [ [ (builtin .subtractInteger) (con integer 3) ] (con integer 3) ]
+            [ [ (builtin subtractInteger) (con integer 3) ] (con integer 3) ]
           ]
         ]
       ]
@@ -743,20 +765,20 @@ theorem apply_add_2(f: String) (x: String) :
             x2
             [
               [
-                (builtin .addInteger)
+                (builtin addInteger)
                 [
-                  [ (builtin .subtractInteger) (con integer 0) ] (con integer 3)
+                  [ (builtin subtractInteger) (con integer 0) ] (con integer 3)
                 ]
               ]
-              [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 1) ]
+              [ [ (builtin subtractInteger) (con integer 2) ] (con integer 1) ]
             ]
           )
           [
             [
-              (builtin .subtractInteger)
-              [ [ (builtin .addInteger) (con integer 1) ] (con integer 1) ]
+              (builtin subtractInteger)
+              [ [ (builtin addInteger) (con integer 1) ] (con integer 1) ]
             ]
-            [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 0) ]
+            [ [ (builtin subtractInteger) (con integer 2) ] (con integer 0) ]
           ]
         ]
       )
@@ -766,17 +788,17 @@ theorem apply_add_2(f: String) (x: String) :
           [
             [
               (builtin lessThanInteger)
-              [ [ (builtin .multiplyInteger) (con integer 0) ] (con integer 3) ]
+              [ [ (builtin multiplyInteger) (con integer 0) ] (con integer 3) ]
             ]
-            [ [ (builtin .addInteger) (con integer 0) ] (con integer 1) ]
+            [ [ (builtin addInteger) (con integer 0) ] (con integer 1) ]
           ]
         )
         [
           [
             (builtin equalsInteger)
-            [ [ (builtin .multiplyInteger) (con integer 3) ] (con integer 2) ]
+            [ [ (builtin multiplyInteger) (con integer 3) ] (con integer 2) ]
           ]
-          [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 0) ]
+          [ [ (builtin subtractInteger) (con integer 2) ] (con integer 0) ]
         ]
       ]
     ]
