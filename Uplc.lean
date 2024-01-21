@@ -8,6 +8,7 @@ deriving Repr
 inductive Function where
   | addInteger : Function
   | subtractInteger : Function
+  | multiplyInteger: Function
   | lessThanInteger : Function
   | lessThanEqualsInteger : Function
 deriving Repr
@@ -16,12 +17,13 @@ def builtin_arity (function: Function): Nat × Nat :=
   match function with
   | .addInteger => (0, 2)
   | .subtractInteger => (0, 2)
+  | .multiplyInteger => (0, 2)
   | .lessThanInteger => (0, 2)
   | .lessThanEqualsInteger => (0, 2)
 
 
 inductive Constant where
-  | int (i: Int) : Constant
+  | integer (i: Int) : Constant
   | bool (b: Bool) : Constant
 deriving Repr
 
@@ -153,23 +155,28 @@ def eval_builtin (s: Stack) (b: BuiltinValue) (h: builtin_size b = builtin_arity
 
   match (builtin_name b) with
     | .addInteger => match (args[0], args[1]) with
-      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
-        State.ret (Value.vCon (Constant.int (l + r))) s
+      | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
+        State.ret (Value.vCon (Constant.integer (l + r))) s
       | (_, _) => State.error
 
     | .subtractInteger => match (args[0], args[1]) with
-      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
-        State.ret (Value.vCon (Constant.int (l - r))) s
+      | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
+        State.ret (Value.vCon (Constant.integer (l - r))) s
       | (_, _) => State.error
 
     | .lessThanInteger => match (args[0], args[1]) with
-      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
+      | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
         State.ret (Value.vCon (Constant.bool (l < r))) s
       | (_, _) => State.error
 
     | .lessThanEqualsInteger => match (args[0], args[1]) with
-      | (Value.vCon (Constant.int l), Value.vCon (Constant.int r)) =>
+      | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
         State.ret (Value.vCon (Constant.bool (l <= r))) s
+      | (_, _) => State.error
+
+    | .multiplyInteger => match (args[0], args[1]) with
+      | (Value.vCon (Constant.integer l), Value.vCon (Constant.integer r)) =>
+        State.ret (Value.vCon (Constant.integer (l * r))) s
       | (_, _) => State.error
 
 
@@ -219,26 +226,35 @@ inductive small_step : State -> State -> Prop
 
 infix: 100 "⟶" => small_step
 
-syntax "Term|" term : term
+syntax:max "Term|" term : term
 
-syntax:max "var/" term: term
+syntax:max "Type|" term : term
+
+syntax:max "var/" term : term
 
 macro_rules
 | `(Term|(lam $x $m)) => `(Term.lam $x (Term|$m))
+| `(Term|[var/$x var/$y]) => `(Term.app (Term.var $x) (Term.var $y))
+| `(Term|var/$x) => `(Term.var $x)
 | `(Term|[$m $n]) => `(Term.app (Term|$m) (Term|$n))
 | `(Term|(force $m)) => `(Term.force (Term|$m))
 | `(Term|(delay $m)) => `(Term.delay (Term|$m))
 | `(Term|(error)) => `(Term.error)
-| `(Term|(con $c)) => `(Term.con $c)
-| `(Term| (builtin $b)) => `(Term.builtin $b)
-| `(Term|var/$x) => `(Term.var $x)
+| `(Term|(con $t $c)) => `(Term.con (Type|$t $c))
+| `(Term|(builtin $b)) => `(Term.builtin $b)
 | `(Term|$t) => `($t)
+
+
+macro_rules
+| `(Type|integer $c) => `(Constant.integer $c)
+| `(Type|bool $c) => `(Constant.bool $c)
 
 -- notation: max "(lam " name:max body:max ")" => Term.lam name body
 -- notation: max "(delay " body:max ")" => Term.delay body
 -- notation: max "(force " body:max ")" => Term.force body
 
-
+def x := (Term| (con integer 5))
+def y {f x} := (Term| (lam f (lam x [var/f  var/x])))
 
 
 theorem small_step_compute_lambda
@@ -345,8 +361,8 @@ theorem forces3
 
 theorem lam_apply_var_is_applied_term
   {x p}:
-  (State.compute (Term|[ (lam x var/x) (con (.int 5))]) p []) ⟶
-  (State.halt (Value.vCon (.int 5))) := by
+  (State.compute (Term|[(lam x var/x) (con integer 5)]) p []) ⟶
+  (State.halt (Value.vCon (.integer 5))) := by
     apply small_step.seq
     case h => exact small_step.computeApp
     case h' =>
@@ -377,8 +393,8 @@ theorem lam_apply_var_is_applied_term
 
 theorem lam_apply_var_is_applied_term2
   {x p}:
-  (State.compute (Term|[ (lam x var/x) (con (.int 5))]) p []) ⟶
-  (State.halt (Value.vCon (.int 5))) := by
+  (State.compute (Term|[ (lam x var/x) (con integer 5)]) p []) ⟶
+  (State.halt (Value.vCon (.integer 5))) := by
     repeat (first
       | apply small_step.computeApp
       | apply small_step.computeLambda
@@ -394,8 +410,8 @@ theorem lam_apply_var_is_applied_term2
 
 theorem builtin_apply_add_integer
   {p}:
-  (State.compute (Term| [[(builtin (.addInteger) ) (con (.int 2))] (con (.int 3))]) p []) ⟶
-  (State.halt (Value.vCon (.int 5))) := by
+  (State.compute (Term| [[(builtin .addInteger) (con integer 2)] (con integer 3)]) p []) ⟶
+  (State.halt (Value.vCon (.integer 5))) := by
     apply small_step.seq
     apply small_step.computeApp
     apply small_step.seq
@@ -439,8 +455,8 @@ theorem builtin_apply_add_integer
 
 theorem builtin_apply_add_integer2
   {p}:
-  (State.compute (Term| [[(builtin (.addInteger) ) (con (.int 2))] (con (.int 3))]) p []) ⟶
-  (State.halt (Value.vCon (.int 5))) := by
+  (State.compute (Term| [[(builtin (.addInteger) ) (con integer 2)] (con integer 3)]) p []) ⟶
+  (State.halt (Value.vCon (.integer 5))) := by
     repeat (first
       | apply small_step.computeApp
       | apply small_step.computeBuiltin
@@ -463,8 +479,8 @@ theorem builtin_apply_add_integer2
 
 theorem builtin_apply_sub_integer
   {p}:
-  (State.compute (Term| [[(builtin (.subtractInteger) ) (con (.int 2))] (con (.int 3))]) p []) ⟶
-  (State.halt (Value.vCon (.int (-1)))) := by
+  (State.compute (Term| [[(builtin (.subtractInteger) ) (con integer 2)] (con integer 3)]) p []) ⟶
+  (State.halt (Value.vCon (.integer (-1)))) := by
     repeat (first
       | apply small_step.computeApp
       | apply small_step.computeBuiltin
@@ -486,7 +502,7 @@ theorem builtin_apply_sub_integer
 
 theorem builtin_apply_less_than_integer
   {p} (i: Int) (q: 5 < i):
-  (State.compute (Term| [[(builtin (.lessThanInteger)) (con (.int 5))] (con (.int i))]) p []) ⟶
+  (State.compute (Term| [[(builtin (.lessThanInteger)) (con integer 5)] (con integer i)]) p []) ⟶
   (State.halt (Value.vCon (.bool true))) := by
     apply small_step.seq
     apply small_step.computeApp
@@ -532,7 +548,7 @@ theorem builtin_apply_less_than_integer
 
 theorem builtin_apply_less_than_integer2
   {p} (i: Int) (q: i > 5):
-  (State.compute (Term| [[(builtin (.lessThanInteger)) (con (.int 5))] (con (.int i))]) p []) ⟶
+  (State.compute (Term| [[(builtin (.lessThanInteger)) (con integer 5)] (con integer i)]) p []) ⟶
   (State.halt (Value.vCon (.bool (true)))) := by
     repeat (first
       | apply small_step.computeApp
@@ -551,3 +567,218 @@ theorem builtin_apply_less_than_integer2
         simp [force_size, builtin_name, builtin_args]
       | apply small_step.ret
       | apply small_step.seq)
+
+
+-- (program
+--   1.0.0
+--   [
+--     [
+--       [
+--         (force (force (delay (delay (lam f (lam x [ f x ]))))))
+--         (builtin addInteger)
+--       ]
+--       [
+--         (lam
+--           x0
+--           [
+--             [
+--               (builtin multiplyInteger)
+--               [
+--                 [
+--                   (builtin subtractInteger)
+--                   [
+--                     [ (builtin subtractInteger) (con integer 3) ]
+--                     (con integer 2)
+--                   ]
+--                 ]
+--                 [ [ (builtin addInteger) (con integer 2) ] (con integer 0) ]
+--               ]
+--             ]
+--             [
+--               [
+--                 (builtin subtractInteger)
+--                 [
+--                   [ (builtin multiplyInteger) (con integer 3) ] (con integer 0)
+--                 ]
+--               ]
+--               [ [ (builtin multiplyInteger) (con integer 1) ] (con integer 1) ]
+--             ]
+--           ]
+--         )
+--         [
+--           [
+--             (builtin lessThanEqualsInteger)
+--             [
+--               [
+--                 (builtin subtractInteger)
+--                 [
+--                   [ (builtin multiplyInteger) (con integer 3) ] (con integer 3)
+--                 ]
+--               ]
+--               [ [ (builtin subtractInteger) (con integer 2) ] (con integer 3) ]
+--             ]
+--           ]
+--           [
+--             [
+--               (builtin addInteger)
+--               [ [ (builtin addInteger) (con integer 2) ] (con integer 3) ]
+--             ]
+--             [ [ (builtin subtractInteger) (con integer 3) ] (con integer 3) ]
+--           ]
+--         ]
+--       ]
+--     ]
+--     [
+--       (lam
+--         x0
+--         [
+--           (lam
+--             x2
+--             [
+--               [
+--                 (builtin addInteger)
+--                 [
+--                   [ (builtin subtractInteger) (con integer 0) ] (con integer 3)
+--                 ]
+--               ]
+--               [ [ (builtin subtractInteger) (con integer 2) ] (con integer 1) ]
+--             ]
+--           )
+--           [
+--             [
+--               (builtin subtractInteger)
+--               [ [ (builtin addInteger) (con integer 1) ] (con integer 1) ]
+--             ]
+--             [ [ (builtin subtractInteger) (con integer 2) ] (con integer 0) ]
+--           ]
+--         ]
+--       )
+--       [
+--         (lam
+--           x1
+--           [
+--             [
+--               (builtin lessThanInteger)
+--               [ [ (builtin multiplyInteger) (con integer 0) ] (con integer 3) ]
+--             ]
+--             [ [ (builtin addInteger) (con integer 0) ] (con integer 1) ]
+--           ]
+--         )
+--         [
+--           [
+--             (builtin equalsInteger)
+--             [ [ (builtin multiplyInteger) (con integer 3) ] (con integer 2) ]
+--           ]
+--           [ [ (builtin subtractInteger) (con integer 2) ] (con integer 0) ]
+--         ]
+--       ]
+--     ]
+--   ]
+-- )
+
+theorem apply_add_2(f: String) (x: String) :
+(State.compute (Term|
+  [
+    [
+      [
+        (force (force (delay (delay (lam f (lam x [ var/f var/x ]))))))
+        (builtin .addInteger)
+      ]
+      [
+        (lam
+          x0
+          [
+            [
+              (builtin .multiplyInteger)
+              [
+                [
+                  (builtin .subtractInteger)
+                  [
+                    [ (builtin .subtractInteger) (con integer 3) ]
+                    (con integer 2)
+                  ]
+                ]
+                [ [ (builtin .addInteger) (con integer 2) ] (con integer 0) ]
+              ]
+            ]
+            [
+              [
+                (builtin .subtractInteger)
+                [
+                  [ (builtin .multiplyInteger) (con integer 3) ] (con integer 0)
+                ]
+              ]
+              [ [ (builtin .multiplyInteger) (con integer 1) ] (con integer 1) ]
+            ]
+          ]
+        )
+        [
+          [
+            (builtin lessThanEqualsInteger)
+            [
+              [
+                (builtin .subtractInteger)
+                [
+                  [ (builtin .multiplyInteger) (con integer 3) ] (con integer 3)
+                ]
+              ]
+              [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 3) ]
+            ]
+          ]
+          [
+            [
+              (builtin .addInteger)
+              [ [ (builtin .addInteger) (con integer 2) ] (con integer 3) ]
+            ]
+            [ [ (builtin .subtractInteger) (con integer 3) ] (con integer 3) ]
+          ]
+        ]
+      ]
+    ]
+    [
+      (lam
+        x0
+        [
+          (lam
+            x2
+            [
+              [
+                (builtin .addInteger)
+                [
+                  [ (builtin .subtractInteger) (con integer 0) ] (con integer 3)
+                ]
+              ]
+              [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 1) ]
+            ]
+          )
+          [
+            [
+              (builtin .subtractInteger)
+              [ [ (builtin .addInteger) (con integer 1) ] (con integer 1) ]
+            ]
+            [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 0) ]
+          ]
+        ]
+      )
+      [
+        (lam
+          x1
+          [
+            [
+              (builtin lessThanInteger)
+              [ [ (builtin .multiplyInteger) (con integer 0) ] (con integer 3) ]
+            ]
+            [ [ (builtin .addInteger) (con integer 0) ] (con integer 1) ]
+          ]
+        )
+        [
+          [
+            (builtin equalsInteger)
+            [ [ (builtin .multiplyInteger) (con integer 3) ] (con integer 2) ]
+          ]
+          [ [ (builtin .subtractInteger) (con integer 2) ] (con integer 0) ]
+        ]
+      ]
+    ]
+  ])
+   p []) ⟶ (State.halt (Value.vCon (.integer (-1)))) := by sorry
