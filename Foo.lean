@@ -1,4 +1,4 @@
--- def hello := "world"
+def hello := "world"
 -- open String
 -- open Nat
 -- open List

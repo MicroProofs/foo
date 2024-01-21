@@ -1,9 +1,5 @@
-def hello := "world"
-open String
-open Nat
-open Int
-open List
-open Bool
+
+
 
 -- Term and Program Structures
 def Name := String
@@ -221,20 +217,40 @@ inductive small_step : State -> State -> Prop
   | catchAll {s} : small_step s State.error
 
 
-infix: 90 "⟶" => small_step
+infix: 100 "⟶" => small_step
+
+syntax "Term|" term : term
+
+syntax:max "var/" term: term
+
+macro_rules
+| `(Term|(lam $x $m)) => `(Term.lam $x (Term|$m))
+| `(Term|[$m $n]) => `(Term.app (Term|$m) (Term|$n))
+| `(Term|(force $m)) => `(Term.force (Term|$m))
+| `(Term|(delay $m)) => `(Term.delay (Term|$m))
+| `(Term|(error)) => `(Term.error)
+| `(Term|(con $c)) => `(Term.con $c)
+| `(Term| (builtin $b)) => `(Term.builtin $b)
+| `(Term|var/$x) => `(Term.var $x)
+| `(Term|$t) => `($t)
+
+-- notation: max "(lam " name:max body:max ")" => Term.lam name body
+-- notation: max "(delay " body:max ")" => Term.delay body
+-- notation: max "(force " body:max ")" => Term.force body
+
 
 
 
 theorem small_step_compute_lambda
-{x m p s} : (State.compute (Term.lam x m) p s) ⟶ (State.ret (Value.vLam x m p) s) := by
+{x m p s} : (State.compute (Term|(lam x m)) p s) ⟶ (State.ret (Value.vLam x m p) s) := by
   apply small_step.computeLambda
 
 
 theorem frame_force_delay_just_term
   {m p s}:
-  (State.compute (Term.delay m) p (Frame.force :: s)) ⟶
+  (State.compute (Term|(delay m)) p (Frame.force :: s)) ⟶
   (State.compute m p s) := by
-    have h': (State.compute (Term.delay m) p (Frame.force :: s)) ⟶
+    have h': (State.compute  (Term|(delay m)) p (Frame.force :: s)) ⟶
       (State.ret (Value.vDelay m p) (Frame.force :: s)) := by
         apply small_step.computeDelay
     have h'': (State.ret (Value.vDelay m p) (Frame.force :: s)) ⟶
@@ -244,19 +260,19 @@ theorem frame_force_delay_just_term
 
 theorem forcing
   {m p s}:
-  (State.compute (Term.force (Term.force m)) p (s)) ⟶
+  (State.compute (Term|(force (force m))) p (s)) ⟶
   (State.compute m p (Frame.force :: Frame.force :: s)) := by
     exact small_step.seq small_step.computeForce small_step.computeForce
 
 
 theorem force_delay_just_term
   {m p s}:
-  (State.compute (Term.force (Term.delay m)) p s) ⟶
+  (State.compute (Term|(force (delay m))) p s) ⟶
   (State.compute m p s) := by
-    have h: (State.compute (Term.force (Term.delay m)) p s) ⟶
-      (State.compute (Term.delay m) p (Frame.force :: s)) := by
+    have h: (State.compute (Term|(force (delay m))) p s) ⟶
+      (State.compute (Term|(delay m)) p (Frame.force :: s)) := by
         apply small_step.computeForce
-    have h': (State.compute (Term.delay m) p (Frame.force :: s)) ⟶
+    have h': (State.compute (Term|(delay m)) p (Frame.force :: s)) ⟶
       (State.ret (Value.vDelay m p) (Frame.force :: s)) := by
         apply small_step.computeDelay
     have h'': (State.ret (Value.vDelay m p) (Frame.force :: s)) ⟶
@@ -266,35 +282,35 @@ theorem force_delay_just_term
 
 theorem double_force_term
   {m p s}:
-  (State.compute (Term.force (Term.force m)) p s) ⟶
+  (State.compute (Term|(force (force m))) p s) ⟶
   (State.compute m p (Frame.force :: Frame.force :: s)) := by
-    have h: (State.compute (Term.force (Term.force m)) p s) ⟶
-      (State.compute (Term.force m) p (Frame.force :: s)) := by
+    have h: (State.compute (Term|(force (force m))) p s) ⟶
+      (State.compute (Term|(force m)) p (Frame.force :: s)) := by
         apply small_step.computeForce
     let s' := Frame.force :: s
-    have h': (State.compute (Term.force m) p s') ⟶
+    have h': (State.compute (Term|(force m)) p s') ⟶
       (State.compute m p (Frame.force :: s')) := by
         apply small_step.computeForce
     exact small_step.seq h h'
 
 theorem force_delay_term
   {m p s}:
-  (State.compute (Term.force (Term.force (Term.delay (Term.delay m)))) p s) ⟶
+  (State.compute (Term|(force (force (delay (delay m))))) p s) ⟶
   (State.compute m p s) := by
-    have h: (State.compute (Term.force (Term.force (Term.delay (Term.delay m)))) p s) ⟶
-      (State.compute (Term.force (Term.delay (Term.delay m))) p (Frame.force :: s)) := by
+    have h: (State.compute (Term|(force (force (delay (delay m))))) p s) ⟶
+      (State.compute (Term|(force (delay (delay m)))) p (Frame.force :: s)) := by
         apply small_step.computeForce
-    have h': (State.compute (Term.force (Term.delay (Term.delay m))) p (Frame.force :: s)) ⟶
-      (State.compute (Term.delay m) p (Frame.force :: s)) := by
+    have h': (State.compute (Term|(force (delay (delay m)))) p (Frame.force :: s)) ⟶
+      (State.compute (Term|(delay m)) p (Frame.force :: s)) := by
         exact force_delay_just_term
-    have h'': (State.compute (Term.delay m) p (Frame.force :: s)) ⟶
+    have h'': (State.compute (Term|(delay m)) p (Frame.force :: s)) ⟶
       (State.compute m p s) := by
         apply frame_force_delay_just_term
     exact small_step.seq (small_step.seq h h') h''
 
 theorem forces
   {m p s}:
-  (State.compute (Term.force (Term.force (Term.force (Term.delay (Term.delay (Term.delay m)))))) p s) ⟶
+  (State.compute (Term|(force (force (force (delay (delay (delay m))))))) p s) ⟶
   (State.compute m p s) := by
     apply small_step.seq
     case h =>
@@ -308,7 +324,7 @@ theorem forces
 
 theorem forces2
   {m p s}:
-  (State.compute (Term.force (Term.force (Term.force (Term.delay (Term.delay (Term.delay m)))))) p s) ⟶
+  (State.compute (Term|(force (force (force (delay (delay (delay m))))))) p s) ⟶
   (State.compute m p s) := by
     repeat (
       first
@@ -321,7 +337,7 @@ theorem forces2
 
 theorem forces3
   {m p s}:
-  (State.compute (Term.force (Term.force (Term.force (Term.delay (Term.delay (Term.delay m)))))) p s) ⟶
+  (State.compute (Term|(force (force (force (delay (delay (delay m))))))) p s) ⟶
   (State.compute m p s) := by
     repeat (first | apply small_step.computeForce | apply small_step.computeDelay | apply small_step.retForceDelay | apply small_step.seq)
 
@@ -329,7 +345,7 @@ theorem forces3
 
 theorem lam_apply_var_is_applied_term
   {x p}:
-  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con (.int 5))) p []) ⟶
+  (State.compute (Term|[ (lam x var/x) (con (.int 5))]) p []) ⟶
   (State.halt (Value.vCon (.int 5))) := by
     apply small_step.seq
     case h => exact small_step.computeApp
@@ -361,7 +377,7 @@ theorem lam_apply_var_is_applied_term
 
 theorem lam_apply_var_is_applied_term2
   {x p}:
-  (State.compute (Term.app (Term.lam x (Term.var x)) (Term.con (.int 5))) p []) ⟶
+  (State.compute (Term|[ (lam x var/x) (con (.int 5))]) p []) ⟶
   (State.halt (Value.vCon (.int 5))) := by
     repeat (first
       | apply small_step.computeApp
@@ -378,7 +394,7 @@ theorem lam_apply_var_is_applied_term2
 
 theorem builtin_apply_add_integer
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con (.int 2))) (Term.con (.int 3))) p []) ⟶
+  (State.compute (Term| [[(builtin (.addInteger) ) (con (.int 2))] (con (.int 3))]) p []) ⟶
   (State.halt (Value.vCon (.int 5))) := by
     apply small_step.seq
     apply small_step.computeApp
@@ -423,7 +439,7 @@ theorem builtin_apply_add_integer
 
 theorem builtin_apply_add_integer2
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (.addInteger) ) (Term.con (.int 2))) (Term.con (.int 3))) p []) ⟶
+  (State.compute (Term| [[(builtin (.addInteger) ) (con (.int 2))] (con (.int 3))]) p []) ⟶
   (State.halt (Value.vCon (.int 5))) := by
     repeat (first
       | apply small_step.computeApp
@@ -447,7 +463,7 @@ theorem builtin_apply_add_integer2
 
 theorem builtin_apply_sub_integer
   {p}:
-  (State.compute (Term.app (Term.app (Term.builtin (.subtractInteger) ) (Term.con (.int 2))) (Term.con (.int 3))) p []) ⟶
+  (State.compute (Term| [[(builtin (.subtractInteger) ) (con (.int 2))] (con (.int 3))]) p []) ⟶
   (State.halt (Value.vCon (.int (-1)))) := by
     repeat (first
       | apply small_step.computeApp
@@ -469,9 +485,9 @@ theorem builtin_apply_sub_integer
 
 
 theorem builtin_apply_less_than_integer
-  {p i} (q: i > 5):
-  (State.compute (Term.app (Term.app (Term.builtin (.lessThanInteger) ) (Term.con (.int 5))) (Term.con (.int i))) p []) ⟶
-  (State.halt (Value.vCon (.bool (true)))) := by
+  {p} (i: Int) (q: 5 < i):
+  (State.compute (Term| [[(builtin (.lessThanInteger)) (con (.int 5))] (con (.int i))]) p []) ⟶
+  (State.halt (Value.vCon (.bool true))) := by
     apply small_step.seq
     apply small_step.computeApp
     apply small_step.seq
@@ -513,9 +529,10 @@ theorem builtin_apply_less_than_integer
           exact small_step.ret
 
 
+
 theorem builtin_apply_less_than_integer2
-  {p i} (q: i > 5):
-  (State.compute (Term.app (Term.app (Term.builtin (.lessThanInteger) ) (Term.con (.int 5))) (Term.con (.int i))) p []) ⟶
+  {p} (i: Int) (q: i > 5):
+  (State.compute (Term| [[(builtin (.lessThanInteger)) (con (.int 5))] (con (.int i))]) p []) ⟶
   (State.halt (Value.vCon (.bool (true)))) := by
     repeat (first
       | apply small_step.computeApp

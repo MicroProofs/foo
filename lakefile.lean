@@ -1,15 +1,15 @@
 import Lake
 open Lake DSL
 
-package «foo» {
+package foo {
   -- add package configuration options here
 }
 
-lean_lib «Foo» {
+lean_lib Foo {
   -- add library configuration options here
 }
 
-@[default_target]
-lean_exe «foo» {
+@[defaultTarget]
+lean_exe foo {
   root := `Main
 }
