@@ -187,6 +187,10 @@ def eval_builtin (s: Stack) (b: BuiltinValue) (h: builtin_size b = builtin_arity
       | (_, _) => State.error
 
 
+def not_saturated_builtin (v: Value): Prop :=
+  match v with
+  | .vBuiltin b => not_all_args_applied (builtin_size b) (builtin_arity (builtin_name b))
+  | _ => true
 
 
 inductive small_step : State -> State -> Prop
@@ -212,11 +216,11 @@ inductive small_step : State -> State -> Prop
 
   | retLeftAppTerm {m p v s} : small_step (State.ret v (Frame.leftAppTerm m p :: s)) (State.compute m p (Frame.rightApp v :: s))
 
-  | retRightApp {x m p v s} : small_step (State.ret v (Frame.rightApp (Value.vLam x m p) :: s)) (State.compute m ((x, v) :: p) s)
+  | retRightApp {x m p v s} (h: not_saturated_builtin v) : small_step (State.ret v (Frame.rightApp (Value.vLam x m p) :: s)) (State.compute m ((x, v) :: p) s)
 
   | retLeftAppValue {x m p v s} : small_step (State.ret (Value.vLam x m p) (Frame.leftAppValue v :: s)) (State.compute m ((x, v) :: p) s)
 
-  | retRightAppBuiltin {b v s} (h: not_all_args_applied (builtin_size b) (builtin_arity (builtin_name b))) : small_step (State.ret v (Frame.rightApp (Value.vBuiltin b) :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
+  | retRightAppBuiltin {b v s} (h: not_all_args_applied (builtin_size b) (builtin_arity (builtin_name b))) (h': not_saturated_builtin v) : small_step (State.ret v (Frame.rightApp (Value.vBuiltin b) :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
 
   | retLeftAppValueBuiltin {b v s} (h: not_all_args_applied (builtin_size b) (builtin_arity (builtin_name b))) : small_step (State.ret (Value.vBuiltin b) (Frame.leftAppValue v :: s)) (State.ret (Value.vBuiltin (BuiltinValue.app b v)) s)
 
@@ -230,6 +234,8 @@ inductive small_step : State -> State -> Prop
 
   | catchAll {s} : small_step s State.error
 
+  | exact {s} : small_step s s
+
 
 infix: 100 "⟶" => small_step
 
@@ -241,10 +247,19 @@ syntax:max "Builtin|" term : term
 
 syntax:max "var/" term : term
 
+syntax:max "var/" term : term
+
+syntax:max "Name|" ident : term
+
+
+
+
+
+
 macro_rules
-| `(Term|(lam $x $m)) => `(Term.lam $x (Term|$m))
-| `(Term|[var/$x var/$y]) => `(Term.app (Term.var $x) (Term.var $y))
-| `(Term|var/$x) => `(Term.var $x)
+| `(Term|(lam $x:ident $m)) => `(Term.lam (Name| $x) (Term|$m))
+| `(Term|[var/$x:ident var/$y:ident]) => `(Term.app (Term.var (Name| $x)) (Term.var (Name| $y)))
+| `(Term|var/$x:ident) => `(Term.var (Name| $x))
 | `(Term|[$m $n]) => `(Term.app (Term|$m) (Term|$n))
 | `(Term|(force $m)) => `(Term.force (Term|$m))
 | `(Term|(delay $m)) => `(Term.delay (Term|$m))
@@ -258,6 +273,8 @@ macro_rules
 | `(Type|integer $c) => `(Constant.integer $c)
 | `(Type|bool $c) => `(Constant.bool $c)
 
+macro_rules
+| `(Name| $x:ident) => `($(Lean.quote (toString x.getId)))
 
 
 macro_rules
@@ -269,18 +286,80 @@ macro_rules
 | `(Builtin|equalsInteger) => `(Function.equalsInteger)
 
 
-
--- notation: max "(lam " name:max body:max ")" => Term.lam name body
--- notation: max "(delay " body:max ")" => Term.delay body
--- notation: max "(force " body:max ")" => Term.force body
-
 def x := (Term| (con integer 5))
-def y {f x} := (Term| (lam f (lam x [var/f  var/x])))
+def y := (Term| (lam x var/x))
+def zz := (Term| (lam y (lam x [var/x var/y])))
+
+-- #eval y
+
+-- #eval zz
+
 def z := (Term| (builtin addInteger))
+
+syntax "triv" : tactic
+
+macro_rules
+  | `(tactic| triv) => `(tactic|
+    repeat
+      (first
+      | apply small_step.computeApp
+        apply small_step.seq
+
+      | apply small_step.computeForce
+        apply small_step.seq
+
+      | apply small_step.computeDelay
+        apply small_step.seq
+
+      | apply small_step.retForceDelay
+        apply small_step.seq
+
+      | apply small_step.computeLambda
+        apply small_step.seq
+
+      | apply small_step.retLeftAppTerm
+        apply small_step.seq
+
+      | apply small_step.computeBuiltin
+        apply small_step.seq
+
+      | apply small_step.builtinEval
+        rw [eval_builtin]
+        simp [builtin_args, builtin_name, *]
+        rfl
+        rw [builtin_arity, builtin_size]
+        simp [force_size, builtin_name, builtin_args]
+        apply small_step.seq
+
+      | apply small_step.retRightAppBuiltin
+        rw [not_all_args_applied]
+        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+        simp [not_saturated_builtin, builtin_arity, builtin_size, builtin_args, builtin_name]
+        apply small_step.seq
+
+      | apply small_step.retRightApp
+        simp [not_saturated_builtin, builtin_arity, builtin_size, builtin_args, builtin_name]
+        apply small_step.seq
+
+      | apply small_step.computeConstant
+        apply small_step.seq
+
+      | apply small_step.computeLookup
+        simp [lookup_var]
+        rfl
+        apply small_step.seq
+
+      | apply small_step.ret
+
+      | apply small_step.exact
+      )
+    )
+
+
 
 
 theorem small_step_compute_lambda
-{x m p s} : (State.compute (Term|(lam x m)) p s) ⟶ (State.ret (Value.vLam x m p) s) := by
+{m p s} : (State.compute (Term|(lam x m)) p s) ⟶ (State.ret (Value.vLam "x" m p) s) := by
   apply small_step.computeLambda
 
 
@@ -377,12 +456,14 @@ theorem forces3
   {m p s}:
   (State.compute (Term|(force (force (force (delay (delay (delay m))))))) p s) ⟶
   (State.compute m p s) := by
-    repeat (first | apply small_step.computeForce | apply small_step.computeDelay | apply small_step.retForceDelay | apply small_step.seq)
+    apply small_step.seq
+    triv
+
 
 
 
 theorem lam_apply_var_is_applied_term
-  {x p}:
+  {p}:
   (State.compute (Term|[(lam x var/x) (con integer 5)]) p []) ⟶
   (State.halt (Value.vCon (.integer 5))) := by
     apply small_step.seq
@@ -398,7 +479,9 @@ theorem lam_apply_var_is_applied_term
           case h => exact small_step.computeConstant
           case h' =>
             apply small_step.seq
-            case h => exact small_step.retRightApp
+            case h =>
+              apply small_step.retRightApp
+              simp [not_saturated_builtin]
             case h' =>
               apply small_step.seq
               case h =>
@@ -414,20 +497,11 @@ theorem lam_apply_var_is_applied_term
 
 
 theorem lam_apply_var_is_applied_term2
-  {x p}:
+  {p}:
   (State.compute (Term|[ (lam x var/x) (con integer 5)]) p []) ⟶
   (State.halt (Value.vCon (.integer 5))) := by
-    repeat (first
-      | apply small_step.computeApp
-      | apply small_step.computeLambda
-      | apply small_step.retLeftAppTerm
-      | apply small_step.computeConstant
-      | apply small_step.retRightApp
-      | apply small_step.computeLookup
-      | simp [lookup_var]
-        rfl
-      | apply small_step.ret
-      | apply small_step.seq)
+    apply small_step.seq
+    triv
 
 
 theorem builtin_apply_add_integer
@@ -449,6 +523,8 @@ theorem builtin_apply_add_integer
     case h =>
       rw [not_all_args_applied]
       simp
+    case h' =>
+      simp [not_saturated_builtin]
 
     case h' =>
       apply small_step.seq
@@ -460,6 +536,9 @@ theorem builtin_apply_add_integer
       case h =>
         rw [not_all_args_applied]
         simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+      case h' =>
+        simp [not_saturated_builtin]
+
       case h' =>
         apply small_step.seq
         case h =>
@@ -479,23 +558,8 @@ theorem builtin_apply_add_integer2
   {p}:
   (State.compute (Term| [[(builtin addInteger) (con integer 2)] (con integer 3)]) p []) ⟶
   (State.halt (Value.vCon (.integer 5))) := by
-    repeat (first
-      | apply small_step.computeApp
-      | apply small_step.computeBuiltin
-      | apply small_step.retLeftAppTerm
-      | apply small_step.computeConstant
-      | apply small_step.retRightAppBuiltin
-      | apply small_step.builtinEval
-      | apply small_step.builtinEvalError
-      | rw [not_all_args_applied]
-        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
-      | rw [eval_builtin]
-        simp [builtin_args, builtin_name]
-        rfl
-      | rw [builtin_arity, builtin_size]
-        simp [force_size, builtin_name, builtin_args]
-      | apply small_step.ret
-      | apply small_step.seq)
+    apply small_step.seq
+    triv
 
 
 
@@ -503,23 +567,8 @@ theorem builtin_apply_sub_integer
   {p}:
   (State.compute (Term| [[(builtin subtractInteger) (con integer 2)] (con integer 3)]) p []) ⟶
   (State.halt (Value.vCon (.integer (-1)))) := by
-    repeat (first
-      | apply small_step.computeApp
-      | apply small_step.computeBuiltin
-      | apply small_step.retLeftAppTerm
-      | apply small_step.computeConstant
-      | apply small_step.retRightAppBuiltin
-      | apply small_step.builtinEval
-      | apply small_step.builtinEvalError
-      | rw [not_all_args_applied]
-        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
-      | rw [eval_builtin]
-        simp [builtin_args, builtin_name]
-        rfl
-      | rw [builtin_arity, builtin_size]
-        simp [force_size, builtin_name, builtin_args]
-      | apply small_step.ret
-      | apply small_step.seq)
+    apply small_step.seq
+    triv
 
 
 theorem builtin_apply_less_than_integer
@@ -543,6 +592,9 @@ theorem builtin_apply_less_than_integer
       simp
 
     case h' =>
+      simp [not_saturated_builtin]
+
+    case h' =>
       apply small_step.seq
       apply small_step.retLeftAppTerm
       apply small_step.seq
@@ -552,6 +604,10 @@ theorem builtin_apply_less_than_integer
       case h =>
         rw [not_all_args_applied]
         simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+
+      case h' =>
+        simp [not_saturated_builtin]
+
       case h' =>
         apply small_step.seq
         case h =>
@@ -569,26 +625,11 @@ theorem builtin_apply_less_than_integer
 
 
 theorem builtin_apply_less_than_integer2
-  {p} (i: Int) (q: i > 5):
+  {p} (i: Int)  (q: i > 5):
   (State.compute (Term| [[(builtin lessThanInteger) (con integer 5)] (con integer i)]) p []) ⟶
   (State.halt (Value.vCon (.bool (true)))) := by
-    repeat (first
-      | apply small_step.computeApp
-      | apply small_step.computeBuiltin
-      | apply small_step.retLeftAppTerm
-      | apply small_step.computeConstant
-      | apply small_step.retRightAppBuiltin
-      | apply small_step.builtinEval
-      | apply small_step.builtinEvalError
-      | rw [not_all_args_applied]
-        simp [builtin_arity, builtin_size, builtin_args, builtin_name]
-      | rw [eval_builtin]
-        simp [builtin_args, builtin_name, q]
-        rfl
-      | rw [builtin_arity, builtin_size]
-        simp [force_size, builtin_name, builtin_args]
-      | apply small_step.ret
-      | apply small_step.seq)
+    apply small_step.seq
+    triv
 
 
 -- (program
@@ -698,7 +739,7 @@ theorem builtin_apply_less_than_integer2
 --   ]
 -- )
 
-theorem apply_add_2(f: String) (x: String) :
+theorem apply_add_2:
 (State.compute (Term|
   [
     [
@@ -803,4 +844,432 @@ theorem apply_add_2(f: String) (x: String) :
       ]
     ]
   ])
-   p []) ⟶ (State.halt (Value.vCon (.integer (-1)))) := by sorry
+   p []) ⟶ (State.halt (Value.vCon (.integer (-1)))) := by
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeForce
+    -- apply small_step.seq
+    -- apply small_step.computeForce
+    -- apply small_step.seq
+    -- apply small_step.computeDelay
+    -- apply small_step.seq
+    -- apply small_step.retForceDelay
+    -- apply small_step.seq
+    -- apply small_step.computeDelay
+    -- apply small_step.seq
+    -- apply small_step.retForceDelay
+    -- apply small_step.seq
+    -- apply small_step.computeLambda
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retRightApp
+    -- apply small_step.seq
+    -- apply small_step.computeLambda
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeLambda
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeBuiltin
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.retLeftAppTerm
+    -- apply small_step.seq
+    -- apply small_step.computeConstant
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightAppBuiltin
+    -- rw [not_all_args_applied]
+    -- simp [builtin_arity, builtin_size, builtin_args, builtin_name]
+    -- apply small_step.seq
+    -- apply small_step.builtinEval
+    -- rw [eval_builtin]
+    -- simp [builtin_args, builtin_name]
+    -- rfl
+    -- rw [builtin_arity, builtin_size]
+    -- simp [force_size, builtin_name, builtin_args]
+    -- apply small_step.seq
+    -- apply small_step.retRightApp
+    -- apply small_step.seq
+    -- apply small_step.computeApp
+    -- apply small_step.seq
+    -- apply small_step.computeLookup
+    -- simp [lookup_var]
+    -- rfl
